@@ -40,7 +40,7 @@ jobs:
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows" -Name "Personalization" -Force -ErrorAction SilentlyContinue | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" -Name "NoLockScreen" -Value 1 -Force
           
-          # DISABLE WINDOWS UPDATES (Prevents auto-restart)
+          # DISABLE WINDOWS UPDATES
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows" -Name "WindowsUpdate" -Force -ErrorAction SilentlyContinue | Out-Null
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "AU" -Force -ErrorAction SilentlyContinue | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoUpdate" -Value 1 -Force
@@ -56,12 +56,12 @@ jobs:
           # DISABLE NLA
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           
-          # DISABLE ALL TIMEOUTS (NEVER DISCONNECT)
+          # DISABLE ALL TIMEOUTS
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxDisconnectionTime" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxConnectionTime" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxIdleTime" -Value 0 -Force
           
-          # FIX BLACK SCREEN - Disable RemoteFX
+          # FIX BLACK SCREEN
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT" -Name "Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fEnableRemoteFX" -Value 0 -Force
           
@@ -104,12 +104,13 @@ jobs:
               Add-LocalGroupMember -Group "Administrators" -Member $userName
               Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName
               
-              # Save credentials
-              @"
+              # SAVE CREDENTIALS - FIXED HEREDOC SYNTAX
+              $credContent = @"
 RDP_USER=$userName
 RDP_PASSWORD=$password
 CREATED=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-"@ | Out-File -FilePath $credFile -Encoding UTF8
+"@
+              $credContent | Out-File -FilePath $credFile -Encoding UTF8
               
               Write-Host "✅ New user created" -ForegroundColor Green
           } else {
@@ -127,29 +128,29 @@ CREATED=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
       - name: 🔄 ANTI-FREEZE BACKGROUND SERVICE
         shell: pwsh
         run: |
-          # Create keep-alive script
+          # Create keep-alive script - FIXED HEREDOC SYNTAX
           $serviceScript = @'
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
-          
-          $logFile = "C:\Users\Public\keepalive.log"
-          
-          while($true) {
-              try {
-                  # Random mouse movement (prevents screen lock)
-                  $x = Get-Random -Minimum 100 -Maximum 1500
-                  $y = Get-Random -Minimum 100 -Maximum 800
-                  [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
-                  
-                  # Small key press (F13 key - does nothing)
-                  [System.Windows.Forms.SendKeys]::SendWait("{F13}")
-                  
-                  Start-Sleep -Seconds (Get-Random -Minimum 45 -Maximum 60)
-              }
-              catch {
-                  Start-Sleep -Seconds 60
-              }
-          }
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$logFile = "C:\Users\Public\keepalive.log"
+
+while($true) {
+    try {
+        # Random mouse movement (prevents screen lock)
+        $x = Get-Random -Minimum 100 -Maximum 1500
+        $y = Get-Random -Minimum 100 -Maximum 800
+        [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+        
+        # Small key press (F13 key - does nothing)
+        [System.Windows.Forms.SendKeys]::SendWait("{F13}")
+        
+        Start-Sleep -Seconds (Get-Random -Minimum 45 -Maximum 60)
+    }
+    catch {
+        Start-Sleep -Seconds 60
+    }
+}
 '@
           
           # Save script
@@ -237,7 +238,7 @@ CREATED=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           Write-Host "📊 Running continuously for $totalHours hours (no 6-hour reset)" -ForegroundColor Green
           Write-Host ""
           
-          # Continuous loop (no 6-hour limit)
+          # Continuous loop
           while ((Get-Date) -lt $endTime) {
               $now = Get-Date
               $elapsed = $now - $startTime
@@ -254,14 +255,14 @@ CREATED=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
               
               Write-Host "⏱️  $(Get-Date -Format 'HH:mm:ss') | $bar | ${elapsedHours}h/${totalHours}h (${elapsedPercent}%) | Remaining: ${remainingHours}h" -ForegroundColor Green
               
-              # Health check every 5 minutes
+              # Health check
               $tsStatus = & "$env:ProgramFiles\Tailscale\tailscale.exe" status --json 2>$null | ConvertFrom-Json
               if ($tsStatus.BackendState -ne "Running") {
                   Write-Host "⚠️ Reconnecting Tailscale..." -ForegroundColor Yellow
                   & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname="rdp-${{ github.run_id }}" --accept-routes
               }
               
-              Start-Sleep -Seconds 300  # Check every 5 minutes
+              Start-Sleep -Seconds 300
           }
           
           Write-Host ""
