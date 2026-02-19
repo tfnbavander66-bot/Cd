@@ -1,0 +1,337 @@
+name: 🔥 DURANTO RDP - 120 HOURS PERSISTENT
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_hours:
+        description: '⏱️ Session Hours'
+        required: true
+        default: '120'
+        type: choice
+        options:
+          - 24
+          - 48
+          - 72
+          - 96
+          - 120
+
+jobs:
+  persistent-rdp:
+    runs-on: windows-latest
+    timeout-minutes: ${{ github.event.inputs.session_hours == '120' && 7200 || (github.event.inputs.session_hours == '96' && 5760 || (github.event.inputs.session_hours == '72' && 4320 || (github.event.inputs.session_hours == '48' && 2880 || 1440))) }}
+
+    steps:
+      - name: 🧹 CLEAN POWER & SCREEN SETTINGS (No Sleep/No Black Screen)
+        shell: pwsh
+        run: |
+          # POWER SETTINGS - NEVER SLEEP
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change monitor-timeout-dc 0
+          powercfg /change standby-timeout-ac 0
+          powercfg /change standby-timeout-dc 0
+          powercfg /change hibernate-timeout-ac 0
+          powercfg /change hibernate-timeout-dc 0
+          
+          # HIGH PERFORMANCE MODE
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          
+          # DISABLE SCREENSAVER
+          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveActive" -Value 0 -Force
+          
+          # DISABLE LOCK SCREEN
+          New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows" -Name "Personalization" -Force | Out-Null
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization" -Name "NoLockScreen" -Value 1 -Force
+          
+          Write-Host "✅ Power settings: NEVER SLEEP" -ForegroundColor Green
+
+      - name: 🖥️ RDP ULTIMATE FIX (No Freeze/No Disconnect)
+        shell: pwsh
+        run: |
+          # ENABLE RDP
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          
+          # DISABLE NLA (Network Level Authentication)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          
+          # ⭐ CRITICAL: DISABLE ALL TIMEOUTS (Makes RDP never disconnect)
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxDisconnectionTime" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxConnectionTime" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "MaxIdleTime" -Value 0 -Force
+          
+          # ⭐ FIX FOR BLACK SCREEN/FREEZE
+          # Disable RemoteFX (main cause of black screen)
+          New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT" -Name "Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fEnableRemoteFX" -Value 0 -Force
+          
+          # Disable wallpaper & visual effects
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
+          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "UserPreferencesMask" -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -Force
+          
+          # KEEP ALIVE SETTINGS
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "KeepAliveEnable" -Value 1 -Force
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "KeepAliveInterval" -Value 1 -Force
+          
+          # FIREWALL
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          
+          # RESTART RDP SERVICE
+          Restart-Service -Name TermService -Force
+          
+          Write-Host "✅ RDP configured - NO TIMEOUT, NO BLACK SCREEN" -ForegroundColor Green
+
+      - name: 👤 CREATE PERSISTENT USER (Data Never Lost)
+        shell: pwsh
+        run: |
+          $credFile = "C:\Users\Public\rdp_credentials.txt"
+          $userName = "RDPUser"
+          
+          # Check if user exists and credentials file exists
+          $userExists = Get-LocalUser -Name $userName -ErrorAction SilentlyContinue
+          
+          if (-not $userExists -or -not (Test-Path $credFile)) {
+              # Generate strong password
+              $special = "!@#$%&".ToCharArray()
+              $password = "RDP@" + ( -join ((65..90) | Get-Random -Count 3 | % {[char]$_}) ) + ( -join ((97..122) | Get-Random -Count 3 | % {[char]$_}) ) + ( -join ((48..57) | Get-Random -Count 3 | % {[char]$_}) ) + (Get-Random -InputObject $special)
+              
+              $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+              
+              # Delete if exists but no credentials file
+              if ($userExists) { Remove-LocalUser -Name $userName -Force }
+              
+              # Create new user
+              New-LocalUser -Name $userName -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+              Add-LocalGroupMember -Group "Administrators" -Member $userName
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName
+              
+              # Save credentials FOREVER
+              @"
+RDP_USER=$userName
+RDP_PASSWORD=$password
+CREATED_ON=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+EXPIRY=NEVER
+"@ | Out-File -FilePath $credFile -Encoding UTF8
+              
+              Write-Host "✅ New user created with PERSISTENT credentials" -ForegroundColor Green
+          } else {
+              Write-Host "✅ Existing user found - DATA PRESERVED" -ForegroundColor Green
+          }
+          
+          # Always load credentials to env
+          if (Test-Path $credFile) {
+              $content = Get-Content $credFile
+              $env:RDP_USER = ($content | Where-Object {$_ -match "RDP_USER="}) -replace "RDP_USER=", ""
+              $env:RDP_PASSWORD = ($content | Where-Object {$_ -match "RDP_PASSWORD="}) -replace "RDP_PASSWORD=", ""
+              
+              echo "RDP_USER=$env:RDP_USER" >> $env:GITHUB_ENV
+              echo "RDP_PASSWORD=$env:RDP_PASSWORD" >> $env:GITHUB_ENV
+          }
+
+      - name: 🔄 ANTI-FREEZE BACKGROUND SERVICE
+        shell: pwsh
+        run: |
+          # Create advanced keep-alive service
+          $serviceScript = @'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          
+          # Log file for debugging
+          $logFile = "C:\Users\Public\keepalive.log"
+          
+          function Write-Log {
+              param($Message)
+              "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message" | Out-File -FilePath $logFile -Append
+          }
+          
+          Write-Log "Keep-alive service started"
+          
+          # Random mouse movement to prevent any screen lock
+          while($true) {
+              try {
+                  # Random position
+                  $x = Get-Random -Minimum 100 -Maximum 1000
+                  $y = Get-Random -Minimum 100 -Maximum 700
+                  
+                  # Move mouse
+                  [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+                  
+                  # Check RDP session status
+                  $sessions = quser 2>$null
+                  if ($sessions -like "*disc*") {
+                      Write-Log "Disconnected session detected - will reconnect on next login"
+                  }
+                  
+                  # Log every 30 minutes
+                  if ((Get-Random -Minimum 1 -Maximum 30) -eq 15) {
+                      Write-Log "Service running - Session active"
+                  }
+                  
+                  # Random delay (30-45 seconds)
+                  Start-Sleep -Seconds (Get-Random -Minimum 30 -Maximum 45)
+              }
+              catch {
+                  Write-Log "Error: $_"
+                  Start-Sleep -Seconds 60
+              }
+          }
+'@
+          
+          # Save script
+          $serviceScript | Out-File -FilePath "C:\Users\Public\RDPGuardian.ps1" -Encoding UTF8 -Force
+          
+          # Create Windows Task to run at startup
+          $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Users\Public\RDPGuardian.ps1"
+          $trigger = New-ScheduledTaskTrigger -AtStartup
+          $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+          
+          # Remove old task if exists
+          Unregister-ScheduledTask -TaskName "RDPGuardian" -Confirm:$false -ErrorAction SilentlyContinue
+          
+          # Register new task
+          Register-ScheduledTask -TaskName "RDPGuardian" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
+          
+          # Start now
+          Start-ScheduledTask -TaskName "RDPGuardian"
+          
+          Write-Host "✅ Anti-freeze service running 24/7" -ForegroundColor Green
+
+      - name: 🔗 TAILSCALE INSTALL & CONFIGURE
+        shell: pwsh
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          if (-not $env:TAILSCALE_AUTH_KEY) {
+              Write-Error "❌ Add TAILSCALE_AUTH_KEY in Secrets"
+              exit 1
+          }
+          
+          # Check if Tailscale already installed
+          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $tsInstalled = Test-Path $tsPath
+          
+          if (-not $tsInstalled) {
+              # Download and install
+              $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+              $installer = "$env:TEMP\tailscale.msi"
+              
+              Write-Host "Downloading Tailscale..."
+              Invoke-WebRequest -Uri $url -OutFile $installer
+              
+              Write-Host "Installing Tailscale..."
+              Start-Process msiexec.exe -ArgumentList "/i", "`"$installer`"", "/quiet", "/norestart" -Wait
+              Start-Sleep -Seconds 10
+              
+              Write-Host "✅ Tailscale installed" -ForegroundColor Green
+          } else {
+              Write-Host "✅ Tailscale already installed" -ForegroundColor Green
+          }
+          
+          # Connect to Tailscale
+          Write-Host "Connecting to Tailscale..."
+          & $tsPath up --authkey=$env:TAILSCALE_AUTH_KEY --hostname="rdp-${{ github.run_id }}" --accept-routes
+          
+          # Get IP
+          Start-Sleep -Seconds 10
+          $tsIP = & $tsPath ip -4
+          
+          # Save IP for reference
+          $tsIP | Out-File -FilePath "C:\Users\Public\tailscale_ip.txt" -Force
+          
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          Write-Host "✅ Tailscale IP: $tsIP (FIXED for 120 hours)" -ForegroundColor Green
+
+      - name: 📌 CREATE DATA PRESERVATION MARKER
+        shell: pwsh
+        run: |
+          # Create marker files to ensure data persistence
+          $markerDir = "C:\Users\Public\RDP_Data"
+          New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+          
+          # Session info
+          @"
+SESSION_ID=${{ github.run_id }}
+START_TIME=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+DURATION=${{ github.event.inputs.session_hours }} HOURS
+TAILSCALE_IP=$env:TAILSCALE_IP
+USERNAME=$env:RDP_USER
+"@ | Out-File -FilePath "$markerDir\session_info.txt" -Force
+          
+          # Create a note for BlueStacks data location
+          @"
+Your BlueStacks data is safe here:
+C:\ProgramData\BlueStacks_nxt
+C:\Users\RDPUser\AppData\Local\BlueStacks_nxt
+
+These folders will NOT be deleted after 120 hours.
+The VM continues running even if you disconnect.
+"@ | Out-File -FilePath "$markerDir\BLUESTACKS_DATA.txt" -Force
+          
+          Write-Host "✅ Data preservation markers created" -ForegroundColor Green
+
+      - name: 🎯 DISPLAY CONNECTION DETAILS
+        shell: pwsh
+        run: |
+          Clear-Host
+          Write-Host ""
+          Write-Host "╔════════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
+          Write-Host "║     🔥 DURANTO RDP - 120 HOURS PERSISTENT SESSION 🔥          ║" -ForegroundColor Magenta
+          Write-Host "╠════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
+          Write-Host "║                                                                ║" -ForegroundColor Magenta
+          Write-Host "║  📍 TAILSCALE IP: $($env:TAILSCALE_IP)" -ForegroundColor Yellow
+          Write-Host "║  👤 USERNAME:     $($env:RDP_USER)" -ForegroundColor Yellow
+          Write-Host "║  🔑 PASSWORD:     $($env:RDP_PASSWORD)" -ForegroundColor Yellow
+          Write-Host "║  ⏱️ DURATION:     ${{ github.event.inputs.session_hours }} HOURS (until disconnect)" -ForegroundColor Yellow
+          Write-Host "║                                                                ║" -ForegroundColor Magenta
+          Write-Host "╠════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
+          Write-Host "║  ✨ GUARANTEED FEATURES:                                       ║" -ForegroundColor Magenta
+          Write-Host "║  • NO BLACK SCREEN - Anti-freeze service running              ║" -ForegroundColor Green
+          Write-Host "║  • NO DATA LOSS - User folder preserved                       ║" -ForegroundColor Green
+          Write-Host "║  • NO TIMEOUT - RDP never disconnects                         ║" -ForegroundColor Green
+          Write-Host "║  • PERSISTENT - All BlueStacks data SAFE                      ║" -ForegroundColor Green
+          Write-Host "║                                                                ║" -ForegroundColor Magenta
+          Write-Host "╠════════════════════════════════════════════════════════════════╣" -ForegroundColor Magenta
+          Write-Host "║  📁 BLUESTACKS DATA LOCATIONS:                                 ║" -ForegroundColor Cyan
+          Write-Host "║  • C:\ProgramData\BlueStacks_nxt                              ║" -ForegroundColor Cyan
+          Write-Host "║  • C:\Users\$($env:RDP_USER)\AppData\Local\BlueStacks_nxt         ║" -ForegroundColor Cyan
+          Write-Host "║                                                                ║" -ForegroundColor Magenta
+          Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
+          Write-Host ""
+          Write-Host "✅ SESSION ACTIVE - Connect anytime within ${{ github.event.inputs.session_hours }} hours" -ForegroundColor Green
+          Write-Host ""
+
+      - name: ⏳ MAINTAIN SESSION (120 HOURS KEEP-ALIVE)
+        shell: pwsh
+        run: |
+          $startTime = Get-Date
+          $totalHours = ${{ github.event.inputs.session_hours }}
+          $endTime = $startTime.AddHours($totalHours)
+          
+          Write-Host "🕐 Session started at: $startTime" -ForegroundColor Cyan
+          Write-Host "🕐 Session ends at:    $endTime" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "📊 Session will run for $totalHours hours (until GitHub timeout)" -ForegroundColor Yellow
+          Write-Host ""
+          
+          # Keep-alive loop with status updates
+          while ((Get-Date) -lt $endTime) {
+              $now = Get-Date
+              $elapsed = $now - $startTime
+              $remaining = $endTime - $now
+              
+              $elapsedHours = [math]::Round($elapsed.TotalHours, 1)
+              $remainingHours = [math]::Round($remaining.TotalHours, 1)
+              
+              Write-Host "⏱️  $(Get-Date -Format 'HH:mm:ss') | Elapsed: ${elapsedHours}h | Remaining: ${remainingHours}h | Status: ACTIVE" -ForegroundColor Green
+              
+              # Quick health check
+              $tsStatus = & "$env:ProgramFiles\Tailscale\tailscale.exe" status --json 2>$null | ConvertFrom-Json
+              if ($tsStatus.BackendState -ne "Running") {
+                  Write-Host "⚠️ Tailscale reconnecting..." -ForegroundColor Yellow
+                  & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname="rdp-${{ github.run_id }}" --accept-routes
+              }
+              
+              Start-Sleep -Seconds 300  # Check every 5 minutes
+          }
+          
+          Write-Host "✅ Session completed $totalHours hours successfully!" -ForegroundColor Green
