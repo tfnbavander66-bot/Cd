@@ -114,13 +114,11 @@ jobs:
               Add-LocalGroupMember -Group "Administrators" -Member $userName
               Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName
               
-              # Save credentials to file (PERSISTENT)
-              $credContent = @"
-RDP_USER=$userName
-RDP_PASSWORD=$password
-CREATED_ON=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-"@
-              $credContent | Out-File -FilePath $credFile -Encoding UTF8
+              # Save credentials to file (PERSISTENT) - ADD-CONTENT METHOD
+              "RDP_USER=$userName" | Out-File -FilePath $credFile -Encoding UTF8
+              "RDP_PASSWORD=$password" | Add-Content -Path $credFile -Encoding UTF8
+              "CREATED_ON=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Add-Content -Path $credFile -Encoding UTF8
+              
               
               Write-Host "✅ New user created with PERSISTENT credentials" -ForegroundColor Green
           } else {
